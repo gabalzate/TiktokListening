@@ -1,6 +1,7 @@
+import google.generativeai as genai
 import os
-from openai import OpenAI  # Usamos la librería compatible con OpenRouter
-from config import OPENROUTER_API_KEY  # Asegúrate de actualizar esto en tu config.py
+import re
+from config import GEMINI_API_KEY # Asegúrate de que tu clave API de Gemini esté en el archivo config.py
 
 # ------------------
 # VARIABLES DE CONFIGURACIÓN
@@ -9,57 +10,32 @@ from config import OPENROUTER_API_KEY  # Asegúrate de actualizar esto en tu con
 INPUT_FOLDER = "discurso_perfiles"
 # Carpeta donde se guardarán los resultados del análisis
 OUTPUT_FOLDER = "analisis_discurso_llm"
-
-# Modelo a usar en OpenRouter.
-# Nota: En OpenRouter los modelos de Google suelen llevar el prefijo 'google/'
-# Ejemplos: 'google/gemini-2.0-flash-001', 'meta-llama/llama-3.1-70b-instruct', 'anthropic/claude-3.5-sonnet'
-MODEL_NAME = 'deepseek/deepseek-v3.2' 
-
-# URL base de OpenRouter
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+# Modelo a usar
+MODEL_NAME = 'gemini-2.5-flash'
 # ------------------
 
-def get_openrouter_client():
-    """Configura y retorna el cliente de OpenAI apuntando a OpenRouter."""
-    return OpenAI(
-        base_url=OPENROUTER_BASE_URL,
-        api_key=OPENROUTER_API_KEY,
-    )
+def configure_api():
+    """Configura la API de Gemini con la clave proporcionada."""
+    genai.configure(api_key=GEMINI_API_KEY)
 
 def generate_llm_response(prompt: str) -> str or None:
     """
-    Envía el prompt al modelo a través de OpenRouter y retorna la respuesta.
+    Envía el prompt al modelo de Gemini y retorna la respuesta.
     """
-    client = get_openrouter_client()
-    
     try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {
-                    "role": "user", 
-                    "content": prompt
-                }
-            ],
-            # Headers opcionales recomendados por OpenRouter para rankings
-            extra_headers={
-                "HTTP-Referer": "https://tusingulardominio.com", # Opcional
-                "X-Title": "Analisis Discurso Politico Script",  # Opcional
-            }
-        )
-        
-        # Extraer el contenido de la respuesta
-        return response.choices[0].message.content
-        
+        model = genai.GenerativeModel(MODEL_NAME)
+        response = model.generate_content(prompt)
+        return response.text
     except Exception as e:
-        print(f"❌ Error al llamar a la API de OpenRouter: {e}")
+        print(f"❌ Error al llamar a la API de Gemini: {e}")
         return None
 
 def main():
     """
     Función principal para iterar sobre los corpus, generar análisis y guardar resultados.
     """
-    # 1. (La configuración de API ahora se hace dentro de generate_llm_response o al instanciar el cliente)
+    # 1. Configurar la API de Gemini
+    configure_api()
 
     # 2. Crear la carpeta de salida
     if not os.path.exists(OUTPUT_FOLDER):
@@ -84,7 +60,7 @@ def main():
             with open(file_path, 'r', encoding='utf-8') as f:
                 corpus_text = f.read()
             
-            # 5. Rellenar el prompt con el texto del corpus (Mismo prompt original)
+            # 5. Rellenar el prompt con el texto del corpus, manteniendo la versión original
             MASTER_PROMPT = """
             Actúa como un analista político y de comunicación experto. A continuación, te proporcionaré el corpus de texto completo de todas las publicaciones de un candidato presidencial de Colombia en Instagram.
 
@@ -132,7 +108,7 @@ def main():
             print(f"  ❌ Ocurrió un error inesperado al procesar '{profile_name}': {e}")
             continue
 
-    print("\n🎉 Proceso de análisis de discurso con OpenRouter completado.")
+    print("\n🎉 Proceso de análisis de discurso con el LLM completado.")
 
 if __name__ == "__main__":
     main()

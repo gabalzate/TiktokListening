@@ -1,7 +1,6 @@
-import google.generativeai as genai
 import os
-import re
-from config import GEMINI_API_KEY # Asegúrate de que tu clave API esté en el archivo config.py
+from openai import OpenAI  # Cliente compatible con OpenRouter
+from config import OPENROUTER_API_KEY  # Asegúrate de tener esta clave en config.py
 
 # ------------------
 # VARIABLES DE CONFIGURACIÓN
@@ -10,32 +9,52 @@ from config import GEMINI_API_KEY # Asegúrate de que tu clave API esté en el a
 INPUT_FOLDER = "discurso_mayor_engagement"
 # Carpeta donde se guardarán los resultados del análisis
 OUTPUT_FOLDER = "analisis_discurso_engagement"
-# Modelo a usar
-MODEL_NAME = 'gemini-2.5-flash'
+
+# Modelo a usar en OpenRouter (Google Gemini 2.0 Flash)
+MODEL_NAME = 'deepseek/deepseek-v3.2'
+
+# URL base de OpenRouter
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 # ------------------
 
-def configure_api():
-    """Configura la API de Gemini con la clave proporcionada."""
-    genai.configure(api_key=GEMINI_API_KEY)
+def get_openrouter_client():
+    """Configura y retorna el cliente de OpenAI apuntando a OpenRouter."""
+    return OpenAI(
+        base_url=OPENROUTER_BASE_URL,
+        api_key=OPENROUTER_API_KEY,
+    )
 
 def generate_llm_response(prompt: str) -> str or None:
     """
-    Envía el prompt al modelo de Gemini y retorna la respuesta.
+    Envía el prompt al modelo a través de OpenRouter y retorna la respuesta.
     """
+    client = get_openrouter_client()
+    
     try:
-        model = genai.GenerativeModel(MODEL_NAME)
-        response = model.generate_content(prompt)
-        return response.text
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {
+                    "role": "user", 
+                    "content": prompt
+                }
+            ],
+            # Headers opcionales
+            extra_headers={
+                "HTTP-Referer": "https://localhost", 
+                "X-Title": "Analisis Engagement Script",
+            }
+        )
+        return response.choices[0].message.content
     except Exception as e:
-        print(f"❌ Error al llamar a la API de Gemini: {e}")
+        print(f"❌ Error al llamar a la API de OpenRouter: {e}")
         return None
 
 def main():
     """
     Función principal para iterar sobre los corpus, generar análisis y guardar resultados.
     """
-    # 1. Configurar la API de Gemini
-    configure_api()
+    # 1. (La configuración se maneja al instanciar el cliente en generate_llm_response)
 
     # 2. Crear la carpeta de salida
     if not os.path.exists(OUTPUT_FOLDER):
@@ -43,6 +62,7 @@ def main():
         print(f"Carpeta '{OUTPUT_FOLDER}' creada exitosamente.")
 
     # 3. Leer los archivos de corpus de texto de la nueva carpeta
+    # Se mantiene la búsqueda de archivos terminados en '_corpus_engagement.txt'
     corpus_files = [f for f in os.listdir(INPUT_FOLDER) if f.endswith('_corpus_engagement.txt')]
 
     if not corpus_files:
@@ -61,7 +81,7 @@ def main():
             with open(file_path, 'r', encoding='utf-8') as f:
                 corpus_text = f.read()
             
-            # 5. Rellenar el prompt con el texto del corpus, usando el prompt de análisis político
+            # 5. Rellenar el prompt con el texto del corpus (Mismo prompt original)
             MASTER_PROMPT = """
             Actúa como un analista político y de comunicación experto. A continuación, te proporcionaré el corpus de texto completo de todas las publicaciones de un candidato presidencial de Colombia en Instagram.
 
@@ -94,6 +114,7 @@ def main():
             llm_analysis = generate_llm_response(filled_prompt)
 
             # 7. Guardar el análisis en un archivo
+            # Se mantiene el nombre de salida original '_analisis_dengagement.txt'
             if llm_analysis:
                 output_path = os.path.join(OUTPUT_FOLDER, f"{profile_name}_analisis_dengagement.txt")
                 with open(output_path, 'w', encoding='utf-8') as f:
@@ -109,7 +130,7 @@ def main():
             print(f"  ❌ Ocurrió un error inesperado al procesar '{profile_name}': {e}")
             continue
 
-    print("\n🎉 Proceso de análisis de discurso de mayor engagement con el LLM completado.")
+    print("\n🎉 Proceso de análisis de discurso de mayor engagement con OpenRouter completado.")
 
 if __name__ == "__main__":
     main()

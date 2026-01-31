@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
-from datetime import datetime
+from datetime import datetime, timedelta  # <--- Agregamos timedelta
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
@@ -17,11 +17,13 @@ warnings.filterwarnings("ignore")
 INPUT_FILE = "base_de_datos_tiktok.csv"
 TODAY = datetime.now()
 
+# --- CONFIGURACIÓN DE DÍAS (LO ÚNICO QUE CAMBIAS) ---
+DAYS_BACK = 31  # <--- CAMBIA ESTE NÚMERO (Ej: 30, 60, 90 días)
+START_DATE = TODAY - timedelta(days=DAYS_BACK)
+# ----------------------------------------------------
+
 # ⚠️ La carpeta de salida incluye la fecha de ejecución ⚠️
 FOLDER_NAME = f"analisis_{TODAY.strftime('%Y%m%d')}"
-
-# Determinar el mes y año actual para el filtrado
-CURRENT_MONTH_YEAR = TODAY.strftime('%Y-%m')
 
 # Columnas de interacciones (se usarán en varios pasos)
 ENGAGEMENT_METRICS = [
@@ -52,6 +54,7 @@ def setup_environment():
         return None
 
     # Limpieza: Asegurar que las columnas de fecha y conteo sean correctas
+    # NOTA: Si tus fechas son Dia/Mes/Año y tienes problemas, cambia esto a: pd.to_datetime(..., dayfirst=True)
     df['readable_date'] = pd.to_datetime(df['readable_date'], errors='coerce')
     
     # Convertir columnas de conteo a tipo numérico (integer)
@@ -66,23 +69,26 @@ def setup_environment():
 # =========================================================================
 
 def step_1_data_preparation(df: pd.DataFrame) -> pd.DataFrame:
-    """Filtra el DataFrame por el mes en curso."""
+    """Filtra el DataFrame por los últimos X días."""
     
-    print(f"\n--- PASO 1: Filtrando datos para el mes/año: {CURRENT_MONTH_YEAR} ---")
+    print(f"\n--- PASO 1: Filtrando datos desde {START_DATE.strftime('%Y-%m-%d')} (Hace {DAYS_BACK} días) ---")
     
-    # Filtrar los datos por el mes y año actual
-    df['analysis_month'] = df['readable_date'].dt.strftime('%Y-%m')
-    df_filtered = df[df['analysis_month'] == CURRENT_MONTH_YEAR].copy()
+    # Filtrar los datos: Fecha mayor o igual a la fecha de inicio
+    df_filtered = df[df['readable_date'] >= START_DATE].copy()
     
     # Guardar el DataFrame filtrado
-    output_path = os.path.join(FOLDER_NAME, "01_data_filtrada_mensual.csv")
+    output_path = os.path.join(FOLDER_NAME, "01_data_filtrada_rango.csv")
     df_filtered.to_csv(output_path, index=False)
     
     print(f"Filas después del filtrado: {len(df_filtered)}")
     print(f"Datos filtrados guardados en: {output_path}")
     
     # Crear columna datetime para el análisis de oportunidad posterior
-    df_filtered['create_time_dt'] = pd.to_datetime(df_filtered['create_time'], unit='s')
+    if 'create_time' in df_filtered.columns:
+        df_filtered['create_time_dt'] = pd.to_datetime(df_filtered['create_time'], unit='s')
+    else:
+         # Fallback si no existe create_time, usar readable_date
+        df_filtered['create_time_dt'] = df_filtered['readable_date']
     
     return df_filtered
 
@@ -91,9 +97,9 @@ def step_1_data_preparation(df: pd.DataFrame) -> pd.DataFrame:
 # =========================================================================
 
 def step_2_monthly_summary(df: pd.DataFrame):
-    """Genera la tabla de resumen de actividad mensual por perfil."""
+    """Genera la tabla de resumen de actividad del periodo por perfil."""
     
-    print("\n--- PASO 2: Métricas Básicas Mensuales por Perfil (Resumen) ---")
+    print("\n--- PASO 2: Métricas Básicas del Periodo por Perfil (Resumen) ---")
 
     # 1. Definir agregaciones: contar videos y sumar métricas
     aggregation_functions = {
@@ -104,14 +110,14 @@ def step_2_monthly_summary(df: pd.DataFrame):
 
     # 2. Aplicar la agregación
     df_summary = df.groupby('profile_handle').agg(aggregation_functions).reset_index()
-    df_summary = df_summary.rename(columns={'video_id': 'videos_publicados_mes'})
+    df_summary = df_summary.rename(columns={'video_id': 'videos_publicados_periodo'})
     
     # 3. Ordenar y guardar
-    df_summary = df_summary.sort_values(by='videos_publicados_mes', ascending=False)
-    output_path = os.path.join(FOLDER_NAME, "02_monthly_summary.csv")
+    df_summary = df_summary.sort_values(by='videos_publicados_periodo', ascending=False)
+    output_path = os.path.join(FOLDER_NAME, "02_period_summary.csv")
     df_summary.to_csv(output_path, index=False)
     
-    print(f"Tabla de resumen mensual guardada en: {output_path}")
+    print(f"Tabla de resumen del periodo guardada en: {output_path}")
 
 # =========================================================================
 # 4. PASO 3: ANÁLISIS DE ENGAGEMENT (RATIOS) Y VISUALIZACIÓN
@@ -177,7 +183,7 @@ def step_3_engagement_analysis(df: pd.DataFrame) -> pd.DataFrame:
         hue='Metric',
         palette='viridis'
     )
-    plt.title('Tasa de Engagement Promedio por Vista (ERV) por Perfil y Métrica', fontsize=16)
+    plt.title(f'Tasa de Engagement Promedio (Últimos {DAYS_BACK} días)', fontsize=16)
     plt.xlabel('Perfil', fontsize=14)
     plt.ylabel('Tasa de Engagement Promedio (%)', fontsize=14)
     plt.xticks(rotation=45, ha='right')
@@ -201,7 +207,7 @@ def step_3_engagement_analysis(df: pd.DataFrame) -> pd.DataFrame:
         linewidths=.5,
         cbar_kws={'label': 'Tasa de Engagement Promedio (%)'}
     )
-    plt.title('Heatmap de Tasa de Engagement Promedio por Perfil y Métrica', fontsize=16)
+    plt.title(f'Heatmap de Engagement (Últimos {DAYS_BACK} días)', fontsize=16)
     plt.ylabel('Perfil', fontsize=14)
     plt.xlabel('Métrica de Engagement (ERV)', fontsize=14)
     plt.xticks(rotation=45, ha='right')
@@ -229,9 +235,11 @@ def step_4_top_3_posts(df: pd.DataFrame):
     df_top_3 = df.sort_values(by='total_engagement_rate', ascending=False).head(3)
 
     # 2. Seleccionar y formatear columnas
-    df_top_3 = df_top_3[[
-        'profile_handle', 'description', 'url', 'video_id', 'total_engagement_rate'
-    ]].copy()
+    # Intentamos mantener solo las columnas que existan para evitar errores
+    cols_to_keep = ['profile_handle', 'description', 'url', 'video_id', 'total_engagement_rate']
+    existing_cols = [c for c in cols_to_keep if c in df.columns]
+    
+    df_top_3 = df_top_3[existing_cols].copy()
     df_top_3['total_engagement_rate'] = df_top_3['total_engagement_rate'].round(2)
 
     # 3. Guardar el resultado en CSV
@@ -263,50 +271,54 @@ def step_5_6_advanced_analysis(df: pd.DataFrame):
         posts_count=('video_id', 'count')
     ).reset_index()
 
-    # 3. Guardar la tabla de datos diarios (CSV)
-    df_daily_posts['date_only'] = df_daily_posts['date_only'].astype(str)
-    output_path_csv = os.path.join(FOLDER_NAME, "05_daily_post_count.csv")
-    df_daily_posts.to_csv(output_path_csv, index=False)
-    print(f"6.A. Tabla de posts diarios guardada en: {output_path_csv}")
+    if not df_daily_posts.empty:
+        # 3. Guardar la tabla de datos diarios (CSV)
+        df_daily_posts_csv = df_daily_posts.copy()
+        df_daily_posts_csv['date_only'] = df_daily_posts_csv['date_only'].astype(str)
+        output_path_csv = os.path.join(FOLDER_NAME, "05_daily_post_count.csv")
+        df_daily_posts_csv.to_csv(output_path_csv, index=False)
+        print(f"6.A. Tabla de posts diarios guardada en: {output_path_csv}")
 
-    # 4. Generar Gráfico de Líneas
-    df_plot = df_daily_posts.copy()
-    df_plot['date_only'] = pd.to_datetime(df_plot['date_only'])
-    
-    plt.figure(figsize=(14, 6))
-    sns.lineplot(
-        data=df_plot, x='date_only', y='posts_count', hue='profile_handle',
-        marker='o', dashes=False, palette='Spectral'
-    )
-    plt.title('Cantidad de Posts Diarios por Perfil (Tendencia Mensual)', fontsize=16)
-    plt.xlabel('Fecha', fontsize=14)
-    plt.ylabel('Cantidad de Posts', fontsize=14)
-    plt.xticks(rotation=45, ha='right')
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    plt.legend(title='Perfil', bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.tight_layout()
+        # 4. Generar Gráfico de Líneas
+        df_plot = df_daily_posts.copy()
+        df_plot['date_only'] = pd.to_datetime(df_plot['date_only'])
+        
+        plt.figure(figsize=(14, 6))
+        sns.lineplot(
+            data=df_plot, x='date_only', y='posts_count', hue='profile_handle',
+            marker='o', dashes=False, palette='Spectral'
+        )
+        plt.title(f'Posts Diarios - Últimos {DAYS_BACK} días', fontsize=16)
+        plt.xlabel('Fecha', fontsize=14)
+        plt.ylabel('Cantidad de Posts', fontsize=14)
+        plt.xticks(rotation=45, ha='right')
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.legend(title='Perfil', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
 
-    output_path_png = os.path.join(FOLDER_NAME, "05_daily_post_line_chart.png")
-    plt.savefig(output_path_png)
-    plt.close()
-    print(f"6.A. Gráfico de Líneas guardado en: {output_path_png}")
+        output_path_png = os.path.join(FOLDER_NAME, "05_daily_post_line_chart.png")
+        plt.savefig(output_path_png)
+        plt.close()
+        print(f"6.A. Gráfico de Líneas guardado en: {output_path_png}")
 
     # -----------------------------------------------------------
     # 6.B. Análisis de Longitud de Contenido
     # -----------------------------------------------------------
     
-    # 1. Calcular la longitud del contenido
-    df['description_length'] = df['description'].fillna('').astype(str).apply(len)
-    df['transcript_length'] = df['transcript'].fillna('').astype(str).apply(len)
-
-    # 2. Agrupar y calcular el promedio de longitud
-    df_content_length = df.groupby('profile_handle')[['description_length', 'transcript_length']].mean().reset_index()
-    df_content_length.columns = ['profile_handle', 'avg_description_length', 'avg_transcript_length']
-
-    # 3. Guardar la tabla (CSV)
-    output_path = os.path.join(FOLDER_NAME, "06b_content_length_summary.csv")
-    df_content_length.to_csv(output_path, index=False)
-    print(f"\n6.B. Tabla de longitud de contenido guardada en: {output_path}")
+    if 'description' in df.columns:
+        # 1. Calcular la longitud del contenido
+        df['description_length'] = df['description'].fillna('').astype(str).apply(len)
+        
+        # Agrupar solo por lo que existe
+        group_cols = ['profile_handle']
+        
+        # 2. Agrupar y calcular el promedio de longitud
+        df_content_length = df.groupby(group_cols)[['description_length']].mean().reset_index()
+        
+        # 3. Guardar la tabla (CSV)
+        output_path = os.path.join(FOLDER_NAME, "06b_content_length_summary.csv")
+        df_content_length.to_csv(output_path, index=False)
+        print(f"\n6.B. Tabla de longitud de contenido guardada en: {output_path}")
 
     # -----------------------------------------------------------
     # 6.C. Análisis de Oportunidad por Hora y Día (Optimal Time)
@@ -322,28 +334,29 @@ def step_5_6_advanced_analysis(df: pd.DataFrame):
         avg_play_count=('play_count', 'mean')
     ).reset_index()
 
-    # 3. Guardar la tabla de hora óptima (CSV)
-    output_path_hour = os.path.join(FOLDER_NAME, "06c_optimal_hour_analysis.csv")
-    df_optimal_hour.to_csv(output_path_hour, index=False)
-    print(f"6.C. Tabla de hora óptima guardada en: {output_path_hour}")
+    if not df_optimal_hour.empty:
+        # 3. Guardar la tabla de hora óptima (CSV)
+        output_path_hour = os.path.join(FOLDER_NAME, "06c_optimal_hour_analysis.csv")
+        df_optimal_hour.to_csv(output_path_hour, index=False)
+        print(f"6.C. Tabla de hora óptima guardada en: {output_path_hour}")
 
-    # 4. Generar Gráfico de Líneas para Hora Óptima
-    plt.figure(figsize=(14, 6))
-    sns.lineplot(
-        data=df_optimal_hour, x='hour', y='avg_play_count', hue='profile_handle',
-        marker='o', dashes=False, palette='Spectral'
-    )
-    plt.title('Vistas Promedio por Hora de Publicación (Optimal Hour)', fontsize=16)
-    plt.xlabel('Hora del Día (0-23)', fontsize=14)
-    plt.ylabel('Vistas Promedio (Play Count)', fontsize=14)
-    plt.xticks(range(0, 24))
-    plt.grid(axis='both', linestyle='--', alpha=0.7)
-    plt.legend(title='Perfil', bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.tight_layout()
-    output_path_png = os.path.join(FOLDER_NAME, "06c_optimal_hour_line_chart.png")
-    plt.savefig(output_path_png)
-    plt.close()
-    print(f"6.C. Gráfico de Líneas de hora óptima guardado en: {output_path_png}")
+        # 4. Generar Gráfico de Líneas para Hora Óptima
+        plt.figure(figsize=(14, 6))
+        sns.lineplot(
+            data=df_optimal_hour, x='hour', y='avg_play_count', hue='profile_handle',
+            marker='o', dashes=False, palette='Spectral'
+        )
+        plt.title('Vistas Promedio por Hora de Publicación (Optimal Hour)', fontsize=16)
+        plt.xlabel('Hora del Día (0-23)', fontsize=14)
+        plt.ylabel('Vistas Promedio (Play Count)', fontsize=14)
+        plt.xticks(range(0, 24))
+        plt.grid(axis='both', linestyle='--', alpha=0.7)
+        plt.legend(title='Perfil', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        output_path_png = os.path.join(FOLDER_NAME, "06c_optimal_hour_line_chart.png")
+        plt.savefig(output_path_png)
+        plt.close()
+        print(f"6.C. Gráfico de Líneas de hora óptima guardado en: {output_path_png}")
     
     # 5. Día Óptimo: Agrupar por día de la semana y perfil, y calcular el promedio de play_count
     df_optimal_day = df.groupby(['day_of_week', 'profile_handle']).agg(
@@ -373,9 +386,9 @@ def main():
             step_4_top_3_posts(df_with_erv)
             step_5_6_advanced_analysis(df_with_erv)
             
-            print("\n✅ Proceso de análisis de métricas finalizado. Los resultados están en la carpeta:", FOLDER_NAME)
+            print(f"\n✅ Análisis finalizado. Los resultados están en la carpeta:", FOLDER_NAME)
         else:
-            print("\n⚠️ No se encontraron datos para el mes en curso. Finalizando el script.")
+            print(f"\n⚠️ No se encontraron datos en los últimos {DAYS_BACK} días.")
 
 if __name__ == "__main__":
     main()
